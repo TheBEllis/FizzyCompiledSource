@@ -15,7 +15,6 @@
 
 FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id) : _mesh_id(mesh_id) {
   angle_ = openmc::UPtrAngle(new (openmc::Isotropic));
-  std::cout << mesh_id << " " << _mesh_id << std::endl;
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
@@ -35,26 +34,27 @@ double FizzyCompiledSource::calculateParticleWeight(
 
 double FizzyCompiledSource::calculateParticleWeight(
     const PhotonSharingData *shared_data) const {
-  return calculateParticleWeight(shared_data->_local_domain_strength,
-                                 shared_data->_total_domain_strength);
+  return 8 * calculateParticleWeight(shared_data->_local_domain_strength,
+                                     shared_data->_total_domain_strength);
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(
     uint64_t *seed, const double &local_domain_strength,
     const BoostIpIntDoubMap &elem_strengths) const {
-  double domain_strength = 0;
 
+  std::vector<int> element_ids(elem_strengths.size(), 0);
+  std::vector<double> element_strengths(elem_strengths.size(), 0);
+
+  int i = 0;
   for (auto &pair : elem_strengths) {
-    // pair.first is the element_id
-    // pair.second is the element_strength
-    domain_strength += pair.second;
-
-    if (openmc::prn(seed) <= domain_strength / local_domain_strength) {
-      return pair.first;
-    }
+    element_ids.at(i) = pair.first;
+    element_strengths.at(i) = pair.second;
+    i++;
   }
+  openmc::span probs(element_strengths);
+  openmc::DiscreteIndex di(probs);
   // return an error code if we somehow never sampled?
-  return -1;
+  return element_ids[di.sample(seed)];
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(
@@ -69,10 +69,6 @@ FizzyCompiledSource::sampleElementVolume(uint64_t *seed, int32_t mesh_id,
   // Get openmc mesh
   openmc::Position r;
 
-  for (auto &pair : openmc::model::mesh_map) {
-    std::cout << pair.first << " " << pair.second << std::endl;
-  }
-  openmc::LibMesh mesh;
   int32_t mesh_idx = openmc::model::mesh_map.at(mesh_id);
   const auto &mesh = openmc::model::meshes[mesh_idx];
   r = mesh->sample_element(element_id, seed);
@@ -83,12 +79,14 @@ double
 FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
                                          const PhotonSharingData *shared_data,
                                          const int32_t &element_id) const {
+  const double *p = &shared_data->_photon_fluxes.at(element_id).at(0);
 
-  const double *p = &shared_data->_photon_fluxes.at(element_id)[0];
-  const double *x = &shared_data->_photon_bins[0];
-  size_t n = 24;
-  openmc::Tabular distribution(x, p, n, openmc::Interpolation::histogram,
+  const double *x = &shared_data->_photon_bins.at(0);
+  size_t n_bins = 24;
+  openmc::Tabular distribution(x, p, n_bins, openmc::Interpolation::histogram,
                                nullptr);
+
+  // Scale by 1e6 as bin boundaries are in MeV already
   return distribution.sample(seed);
 }
 
@@ -102,41 +100,43 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // Also trying to put this in a function that returns a PhotonSharingData*
   // or something like that doesn't work and segfaults
 
-  // Get boost::interprocess shared memory
+  // Get MPI rank
   int rank = -1;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  auto return_err = MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+  if (return_err != MPI_SUCCESS) {
+    std::cerr << "MPI_FAILURE" << std::endl;
+  }
+
+  // Get boost::interprocess shared memory
   std::string shared_data_name = "SHARING_DATA_" + std::to_string(rank);
+  boost::interprocess::managed_shared_memory segment;
+  try {
+    segment = boost::interprocess::managed_shared_memory(
+        boost::interprocess::open_only, shared_data_name.c_str());
+  } catch (bi::interprocess_exception) {
+    std::cerr << "Could not find interprocess segment with name "
+              << shared_data_name << std::endl;
 
-  boost::interprocess::managed_shared_memory segment(
-      boost::interprocess::open_only, shared_data_name.c_str());
+    exit(-1);
+  }
 
   std::pair<PhotonSharingData *, std::size_t> instance;
   instance = segment.find<PhotonSharingData>(
       "PhotonSharingData photon_sharing_instance");
   const PhotonSharingData *shared_data = instance.first;
 
-  // for (auto &pair : shared_data->_photon_fluxes) {
-  //   for (auto &flux : pair.second) {
-  //     std::cout << flux << std::endl;
-  //   }
-  // }
-
   // weight
   particle.particle = openmc::ParticleType::photon;
   particle.wgt = calculateParticleWeight(shared_data);
-
   // position
   // Get element index of sampled element
   int32_t element_id = sampleLocalElementsIndex(seed, shared_data);
-
-  // Sample within chosen elements volume
+  // // Sample within chosen elements volume
   particle.r = sampleElementVolume(seed, _mesh_id, element_id);
-
   // angle
   particle.u = angle_->sample(seed);
-
-  // energy
+  // // energy
   particle.E = sampleElementEnergy(seed, shared_data, element_id);
   particle.delayed_group = 0;
 
