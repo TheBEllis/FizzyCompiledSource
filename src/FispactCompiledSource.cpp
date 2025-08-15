@@ -13,31 +13,27 @@
 #include <string>
 #include <sys/types.h>
 
-FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id) : _mesh_id(mesh_id) {
-  angle_ = openmc::UPtrAngle(new (openmc::Isotropic));
+FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
+    : _mesh_id(mesh_id), angle_(openmc::UPtrAngle(new openmc::Isotropic)) {
+  // Set up time_
   double T[]{0.0};
   double p[]{1.0};
   time_ = openmc::UPtrDist{new openmc::Discrete{T, p, 1}};
 
   // Get MPI rank
   auto return_err = MPI_Comm_rank(MPI_COMM_WORLD, &_my_rank);
-
   if (return_err != MPI_SUCCESS) {
     std::cerr << "MPI_FAILURE" << std::endl;
   }
-
   return_err = MPI_Comm_size(MPI_COMM_WORLD, &_num_ranks);
-
-  std::cout << "NUM_RANKS: " << _num_ranks << std::endl;
-
   if (return_err != MPI_SUCCESS) {
     std::cerr << "MPI_FAILURE" << std::endl;
   }
 
+  // Get shared interprocess data
   std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
-  boost::interprocess::managed_shared_memory segment;
   try {
-    segment = boost::interprocess::managed_shared_memory(
+    segment_ = boost::interprocess::managed_shared_memory(
         boost::interprocess::open_only, shared_data_name.c_str());
   } catch (bi::interprocess_exception) {
     std::cerr << "Could not find interprocess segment with name "
@@ -45,20 +41,21 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id) : _mesh_id(mesh_id) {
 
     exit(-1);
   }
-  std::pair<PhotonSharingData *, std::size_t> instance;
-  instance = segment.find<PhotonSharingData>(
+  instance_ = segment_.find<PhotonSharingData>(
       "PhotonSharingData photon_sharing_instance");
-  const PhotonSharingData *shared_data = instance.first;
+
+  // Set class member ptr
+  shared_data_ = instance_.first;
 
   // strength_ = calculateParticleWeight(shared_data);
   // strength_ = shared_data->_total_domain_strength;
   strength_ = 1;
+
+  setupLocalElementsDiscreteIndex(shared_data_);
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
-
   std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
-
   bi::shared_memory_object::remove(shared_data_name.c_str());
 }
 
@@ -74,30 +71,31 @@ double FizzyCompiledSource::calculateParticleWeight(
                                  shared_data->_total_domain_strength);
 }
 
-int32_t FizzyCompiledSource::sampleLocalElementsIndex(
-    uint64_t *seed, const double &local_domain_strength,
-    const BoostIpIntDoubMap &elem_strengths) const {
+void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
+    const PhotonSharingData *shared_data) {
 
-  std::vector<int> element_ids(elem_strengths.size(), 0);
-  std::vector<double> element_strengths(elem_strengths.size(), 0);
+  const BoostIpIntDoubMap &elem_id_to_strength_map =
+      shared_data->_elem_strength;
+
+  std::vector<double> element_strengths(elem_id_to_strength_map.size(), 0);
+
+  element_ids_.assign(elem_id_to_strength_map.size(), 0);
 
   int i = 0;
-  for (auto &pair : elem_strengths) {
-    element_ids.at(i) = pair.first;
+  for (auto &pair : elem_id_to_strength_map) {
+    element_ids_.at(i) = pair.first;
     element_strengths.at(i) = pair.second;
     i++;
   }
 
   openmc::span probs(element_strengths);
-  openmc::DiscreteIndex di(probs);
-  int index = di.sample(seed);
-  return element_ids.at(index);
+  di_ = openmc::DiscreteIndex(probs);
 }
 
-int32_t FizzyCompiledSource::sampleLocalElementsIndex(
-    uint64_t *seed, const PhotonSharingData *shared_data) const {
-  return sampleLocalElementsIndex(seed, shared_data->_local_domain_strength,
-                                  shared_data->_elem_strength);
+int32_t FizzyCompiledSource::sampleLocalElementsIndex(uint64_t *seed) const {
+
+  int index = di_.sample(seed);
+  return element_ids_.at(index);
 }
 
 openmc::Position
@@ -135,7 +133,6 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
 }
 
 openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
-
   // init particle
   openmc::SourceSite particle;
 
@@ -145,35 +142,35 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // or something like that doesn't work and segfaults
 
   // Get boost::interprocess shared memory
-  std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
-  boost::interprocess::managed_shared_memory segment;
-  try {
-    segment = boost::interprocess::managed_shared_memory(
-        boost::interprocess::open_only, shared_data_name.c_str());
-  } catch (bi::interprocess_exception) {
-    std::cerr << "Could not find interprocess segment with name "
-              << shared_data_name << std::endl;
+  // std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
+  // boost::interprocess::managed_shared_memory segment;
+  // try {
+  //   segment = boost::interprocess::managed_shared_memory(
+  //       boost::interprocess::open_only, shared_data_name.c_str());
+  // } catch (bi::interprocess_exception) {
+  //   std::cerr << "Could not find interprocess segment with name "
+  //             << shared_data_name << std::endl;
+  //
+  //   exit(-1);
+  // }
 
-    exit(-1);
-  }
-
-  std::pair<PhotonSharingData *, std::size_t> instance;
-  instance = segment.find<PhotonSharingData>(
-      "PhotonSharingData photon_sharing_instance");
-  const PhotonSharingData *shared_data = instance.first;
+  // std::pair<PhotonSharingData *, std::size_t> instance;
+  // instance = segment.find<PhotonSharingData>(
+  //     "PhotonSharingData photon_sharing_instance");
+  // const PhotonSharingData *shared_data = instance.first;
 
   // weight
   particle.particle = openmc::ParticleType::photon;
-  particle.wgt = calculateParticleWeight(shared_data) * _num_ranks;
+  particle.wgt = calculateParticleWeight(shared_data_) * _num_ranks;
   // position
   // Get element index of sampled element
-  int32_t element_id = sampleLocalElementsIndex(seed, shared_data);
+  int32_t element_id = sampleLocalElementsIndex(seed);
   // Sample within chosen elements volume
   particle.r = sampleElementVolume(seed, _mesh_id, element_id);
   // angle
   particle.u = angle_->sample(seed);
   // energy
-  particle.E = sampleElementEnergy(seed, shared_data, element_id);
+  particle.E = sampleElementEnergy(seed, shared_data_, element_id);
   particle.time = time_->sample(seed);
 
   return particle;

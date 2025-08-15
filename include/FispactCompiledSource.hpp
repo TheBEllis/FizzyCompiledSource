@@ -1,3 +1,4 @@
+#include <boost/interprocess/interprocess_fwd.hpp>
 #include <cstdint>
 #include <memory> // for unique_ptr
 #include <sys/types.h>
@@ -29,12 +30,9 @@ public:
 
   double calculateParticleWeight(const PhotonSharingData *shared_data) const;
 
-  int32_t
-  sampleLocalElementsIndex(uint64_t *seed, const double &local_domain_strength,
-                           const BoostIpIntDoubMap &elem_strengths) const;
+  int32_t sampleLocalElementsIndex(uint64_t *seed) const;
 
-  int32_t sampleLocalElementsIndex(uint64_t *seed,
-                                   const PhotonSharingData *shared_data) const;
+  void setupLocalElementsDiscreteIndex(const PhotonSharingData *shared_data);
 
   openmc::Position sampleElementVolume(u_int64_t *seed, int mesh_id,
                                        int element_id) const;
@@ -44,15 +42,22 @@ public:
                              const int32_t &element_id) const;
 
   bool constraints_applied() const override { return true; }
+
   openmc::SourceSite sample(u_int64_t *seed) const;
-  // data members
-  //
+
+  // Data members
   openmc::UPtrAngle angle_;
-  openmc::UPtrDist time_; //!< Time distribution
-  //
+  openmc::UPtrDist time_;
   //
   int _num_ranks = -1;
   int _my_rank = -1;
-
   int32_t _mesh_id;
+
+  // Interprocess data structures
+  boost::interprocess::managed_shared_memory segment_;
+  std::pair<PhotonSharingData *, std::size_t> instance_;
+  const PhotonSharingData *shared_data_;
+
+  std::vector<int> element_ids_;
+  openmc::DiscreteIndex di_;
 };
