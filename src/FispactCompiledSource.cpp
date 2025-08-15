@@ -15,13 +15,49 @@
 
 FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id) : _mesh_id(mesh_id) {
   angle_ = openmc::UPtrAngle(new (openmc::Isotropic));
+  double T[]{0.0};
+  double p[]{1.0};
+  time_ = openmc::UPtrDist{new openmc::Discrete{T, p, 1}};
+
+  // Get MPI rank
+  auto return_err = MPI_Comm_rank(MPI_COMM_WORLD, &_my_rank);
+
+  if (return_err != MPI_SUCCESS) {
+    std::cerr << "MPI_FAILURE" << std::endl;
+  }
+
+  return_err = MPI_Comm_size(MPI_COMM_WORLD, &_num_ranks);
+
+  std::cout << "NUM_RANKS: " << _num_ranks << std::endl;
+
+  if (return_err != MPI_SUCCESS) {
+    std::cerr << "MPI_FAILURE" << std::endl;
+  }
+
+  std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
+  boost::interprocess::managed_shared_memory segment;
+  try {
+    segment = boost::interprocess::managed_shared_memory(
+        boost::interprocess::open_only, shared_data_name.c_str());
+  } catch (bi::interprocess_exception) {
+    std::cerr << "Could not find interprocess segment with name "
+              << shared_data_name << std::endl;
+
+    exit(-1);
+  }
+  std::pair<PhotonSharingData *, std::size_t> instance;
+  instance = segment.find<PhotonSharingData>(
+      "PhotonSharingData photon_sharing_instance");
+  const PhotonSharingData *shared_data = instance.first;
+
+  // strength_ = calculateParticleWeight(shared_data);
+  // strength_ = shared_data->_total_domain_strength;
+  strength_ = 1;
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
-  int rank = -1;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  std::string shared_data_name = "SHARING_DATA_" + std::to_string(rank);
+  std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
 
   bi::shared_memory_object::remove(shared_data_name.c_str());
 }
@@ -34,8 +70,8 @@ double FizzyCompiledSource::calculateParticleWeight(
 
 double FizzyCompiledSource::calculateParticleWeight(
     const PhotonSharingData *shared_data) const {
-  return 8 * calculateParticleWeight(shared_data->_local_domain_strength,
-                                     shared_data->_total_domain_strength);
+  return calculateParticleWeight(shared_data->_local_domain_strength,
+                                 shared_data->_total_domain_strength);
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(
@@ -51,10 +87,11 @@ int32_t FizzyCompiledSource::sampleLocalElementsIndex(
     element_strengths.at(i) = pair.second;
     i++;
   }
+
   openmc::span probs(element_strengths);
   openmc::DiscreteIndex di(probs);
-  // return an error code if we somehow never sampled?
-  return element_ids[di.sample(seed)];
+  int index = di.sample(seed);
+  return element_ids.at(index);
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(
@@ -71,7 +108,9 @@ FizzyCompiledSource::sampleElementVolume(uint64_t *seed, int32_t mesh_id,
 
   int32_t mesh_idx = openmc::model::mesh_map.at(mesh_id);
   const auto &mesh = openmc::model::meshes[mesh_idx];
-  r = mesh->sample_element(element_id, seed);
+  do {
+    r = mesh->sample_element(element_id, seed);
+  } while (!this->satisfies_spatial_constraints(r));
   return r;
 }
 
@@ -82,12 +121,17 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
   const double *p = &shared_data->_photon_fluxes.at(element_id).at(0);
 
   const double *x = &shared_data->_photon_bins.at(0);
-  size_t n_bins = 24;
+  size_t n_bins = shared_data->_photon_bins.size();
   openmc::Tabular distribution(x, p, n_bins, openmc::Interpolation::histogram,
                                nullptr);
 
-  // Scale by 1e6 as bin boundaries are in MeV already
-  return distribution.sample(seed);
+  while (true) {
+    double energy = distribution.sample(seed);
+
+    if (satisfies_energy_constraints(energy)) {
+      return energy;
+    }
+  }
 }
 
 openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
@@ -100,16 +144,8 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // Also trying to put this in a function that returns a PhotonSharingData*
   // or something like that doesn't work and segfaults
 
-  // Get MPI rank
-  int rank = -1;
-  auto return_err = MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-  if (return_err != MPI_SUCCESS) {
-    std::cerr << "MPI_FAILURE" << std::endl;
-  }
-
   // Get boost::interprocess shared memory
-  std::string shared_data_name = "SHARING_DATA_" + std::to_string(rank);
+  std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
   boost::interprocess::managed_shared_memory segment;
   try {
     segment = boost::interprocess::managed_shared_memory(
@@ -128,17 +164,17 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
 
   // weight
   particle.particle = openmc::ParticleType::photon;
-  particle.wgt = calculateParticleWeight(shared_data);
+  particle.wgt = calculateParticleWeight(shared_data) * _num_ranks;
   // position
   // Get element index of sampled element
   int32_t element_id = sampleLocalElementsIndex(seed, shared_data);
-  // // Sample within chosen elements volume
+  // Sample within chosen elements volume
   particle.r = sampleElementVolume(seed, _mesh_id, element_id);
   // angle
   particle.u = angle_->sample(seed);
-  // // energy
+  // energy
   particle.E = sampleElementEnergy(seed, shared_data, element_id);
-  particle.delayed_group = 0;
+  particle.time = time_->sample(seed);
 
   return particle;
 }

@@ -43,10 +43,16 @@ public:
                              const PhotonSharingData *shared_data,
                              const int32_t &element_id) const;
 
+  bool constraints_applied() const override { return true; }
   openmc::SourceSite sample(u_int64_t *seed) const;
   // data members
   //
   openmc::UPtrAngle angle_;
+  openmc::UPtrDist time_; //!< Time distribution
+  //
+  //
+  int _num_ranks = -1;
+  int _my_rank = -1;
 
   int32_t _mesh_id;
 };
