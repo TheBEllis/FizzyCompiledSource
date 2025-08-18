@@ -44,11 +44,11 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
   instance_ = segment_.find<PhotonSharingData>(
       "PhotonSharingData photon_sharing_instance");
 
-  // Set class member ptr
+  // Set class member ptr to shared data
   shared_data_ = instance_.first;
 
-  // strength_ = calculateParticleWeight(shared_data);
-  // strength_ = shared_data->_total_domain_strength;
+  // Sets strength for entire source term, not just this local contribution
+  // Mostly used for tally normalisation later on!
   strength_ = 1;
 
   setupLocalElementsDiscreteIndex(shared_data_);
@@ -88,8 +88,10 @@ void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
     i++;
   }
 
-  openmc::span probs(element_strengths);
-  di_ = openmc::DiscreteIndex(probs);
+  // Set up discrete index to sample element id's from, copying behavoir from
+  // openmc::MeshSource
+  di_.assign(element_strengths);
+  di_.print();
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(uint64_t *seed) const {
@@ -105,9 +107,13 @@ FizzyCompiledSource::sampleElementVolume(uint64_t *seed, int32_t mesh_id,
   openmc::Position r;
 
   int32_t mesh_idx = openmc::model::mesh_map.at(mesh_id);
-  const auto &mesh = openmc::model::meshes[mesh_idx];
+  std::unique_ptr<openmc::Mesh> &mesh = openmc::model::meshes[mesh_idx];
+
+  openmc::LibMesh *derived_libmesh_ptr =
+      dynamic_cast<openmc::LibMesh *>(mesh.get());
+
   do {
-    r = mesh->sample_element(element_id, seed);
+    r = derived_libmesh_ptr->sample_element(element_id, seed);
   } while (!this->satisfies_spatial_constraints(r));
   return r;
 }
@@ -116,9 +122,13 @@ double
 FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
                                          const PhotonSharingData *shared_data,
                                          const int32_t &element_id) const {
-  const double *p = &shared_data->_photon_fluxes.at(element_id).at(0);
 
-  const double *x = &shared_data->_photon_bins.at(0);
+  // Set up ptrs to element energy distribution and photon bins in shared data,
+  // this is a bit messy but avoids doing a copy!
+  const double *element_energy =
+      &shared_data->_photon_fluxes.at(element_id).at(0);
+
+  const double *photon_bins = &shared_data->_photon_bins.at(0);
   size_t n_bins = shared_data->_photon_bins.size();
   openmc::Tabular distribution(x, p, n_bins, openmc::Interpolation::histogram,
                                nullptr);
@@ -136,41 +146,23 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // init particle
   openmc::SourceSite particle;
 
-  // A bit messy to do setup here, but const can't do it in constructor, as
-  // the constructor is called before the shared memory is ready to be read
-  // Also trying to put this in a function that returns a PhotonSharingData*
-  // or something like that doesn't work and segfaults
-
-  // Get boost::interprocess shared memory
-  // std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
-  // boost::interprocess::managed_shared_memory segment;
-  // try {
-  //   segment = boost::interprocess::managed_shared_memory(
-  //       boost::interprocess::open_only, shared_data_name.c_str());
-  // } catch (bi::interprocess_exception) {
-  //   std::cerr << "Could not find interprocess segment with name "
-  //             << shared_data_name << std::endl;
-  //
-  //   exit(-1);
-  // }
-
-  // std::pair<PhotonSharingData *, std::size_t> instance;
-  // instance = segment.find<PhotonSharingData>(
-  //     "PhotonSharingData photon_sharing_instance");
-  // const PhotonSharingData *shared_data = instance.first;
-
   // weight
   particle.particle = openmc::ParticleType::photon;
+
+  // Currently multiplying by number of ranks, mimicing behavoir in
+  // openmc/src/source.cpp:sample_external_source (line 696)
   particle.wgt = calculateParticleWeight(shared_data_) * _num_ranks;
-  // position
+
+  // Calculate position
   // Get element index of sampled element
   int32_t element_id = sampleLocalElementsIndex(seed);
-  // Sample within chosen elements volume
+  // Sample a position within the volume of our chosen chosen element
   particle.r = sampleElementVolume(seed, _mesh_id, element_id);
-  // angle
+  // Sample an isotropic angle
   particle.u = angle_->sample(seed);
-  // energy
+  // Sample isotropic angle
   particle.E = sampleElementEnergy(seed, shared_data_, element_id);
+  // Sample time
   particle.time = time_->sample(seed);
 
   return particle;
