@@ -1,4 +1,5 @@
 #include "FispactCompiledSource.hpp"
+
 #include "mpi.h"
 #include "openmc/constants.h"
 #include "openmc/distribution.h"
@@ -25,6 +26,7 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
   if (return_err != MPI_SUCCESS) {
     std::cerr << "MPI_FAILURE" << std::endl;
   }
+
   return_err = MPI_Comm_size(MPI_COMM_WORLD, &_num_ranks);
   if (return_err != MPI_SUCCESS) {
     std::cerr << "MPI_FAILURE" << std::endl;
@@ -41,17 +43,17 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
 
     exit(-1);
   }
-  instance_ = segment_.find<PhotonSharingData>(
-      "PhotonSharingData photon_sharing_instance");
-
-  // Set class member ptr to shared data
-  shared_data_ = instance_.first;
+  // instance_ = segment_.find<PhotonSharingData>(
+  //     "PhotonSharingData photon_sharing_instance");
+  //
+  // // Set class member ptr to shared data
+  // shared_data_ = instance_.first;
 
   // Sets strength for entire source term, not just this local contribution
   // Mostly used for tally normalisation later on!
   strength_ = 1;
 
-  setupLocalElementsDiscreteIndex(shared_data_);
+  // setupLocalElementsDiscreteIndex(shared_data_);
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
@@ -91,7 +93,6 @@ void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
   // Set up discrete index to sample element id's from, copying behavoir from
   // openmc::MeshSource
   di_.assign(element_strengths);
-  di_.print();
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(uint64_t *seed) const {
@@ -130,8 +131,8 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
 
   const double *photon_bins = &shared_data->_photon_bins.at(0);
   size_t n_bins = shared_data->_photon_bins.size();
-  openmc::Tabular distribution(x, p, n_bins, openmc::Interpolation::histogram,
-                               nullptr);
+  openmc::Tabular distribution(element_energy, photon_bins, n_bins,
+                               openmc::Interpolation::histogram, nullptr);
 
   while (true) {
     double energy = distribution.sample(seed);
@@ -143,6 +144,23 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
 }
 
 openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
+
+  // If this is the first sample, do setup.
+  // This setup should really be in the constructor, but doing it here makes it
+  // compatible with MOOSE-multiapp runs. When using as a MOOSE-multiapp, the
+  // constructor gets called before the shared data is ready to be read
+  if (!setup_) {
+    auto *p_this = const_cast<FizzyCompiledSource *>(this);
+    p_this->instance_ = p_this->segment_.find<PhotonSharingData>(
+        "PhotonSharingData photon_sharing_instance");
+
+    // Set class member ptr to shared data
+    p_this->shared_data_ = instance_.first;
+
+    p_this->setupLocalElementsDiscreteIndex(shared_data_);
+    p_this->setup_ = true;
+  }
+
   // init particle
   openmc::SourceSite particle;
 

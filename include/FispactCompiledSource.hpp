@@ -1,3 +1,6 @@
+#pragma once
+
+//
 #include <boost/interprocess/interprocess_fwd.hpp>
 #include <cstdint>
 #include <memory> // for unique_ptr
@@ -60,4 +63,6 @@ public:
 
   std::vector<int> element_ids_;
   openmc::DiscreteIndex di_;
+
+  bool setup_ = false;
 };
