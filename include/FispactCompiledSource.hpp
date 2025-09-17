@@ -6,9 +6,6 @@
 #include <memory> // for unique_ptr
 #include <sys/types.h>
 
-// Define LIBMESH so that openmc libmesh gets included
-#define LIBMESH
-
 #include "openmc/distribution_multi.h"
 #include "openmc/position.h"
 #include "utils/PhotonSharingData.h"
@@ -45,6 +42,8 @@ public:
                              const int32_t &element_id) const;
 
   bool constraints_applied() const override { return true; }
+
+  const std::string generateInterprocessName();
 
   openmc::SourceSite sample(u_int64_t *seed) const;
 
