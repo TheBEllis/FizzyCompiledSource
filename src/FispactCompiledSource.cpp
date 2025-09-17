@@ -5,6 +5,7 @@
 #include "openmc/distribution.h"
 #include "openmc/distribution_multi.h"
 #include "openmc/mesh.h"
+#include "openmc/message_passing.h"
 #include "openmc/position.h"
 #include "utils/PhotonSharingData.h"
 #include <cstddef>
@@ -20,20 +21,20 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
   double T[]{0.0};
   double p[]{1.0};
   time_ = openmc::UPtrDist{new openmc::Discrete{T, p, 1}};
-
   // Get MPI rank
-  auto return_err = MPI_Comm_rank(MPI_COMM_WORLD, &_my_rank);
+  //
+  auto return_err = MPI_Comm_rank(openmc::mpi::intracomm, &_my_rank);
   if (return_err != MPI_SUCCESS) {
     std::cerr << "MPI_FAILURE" << std::endl;
   }
 
-  return_err = MPI_Comm_size(MPI_COMM_WORLD, &_num_ranks);
+  return_err = MPI_Comm_size(openmc::mpi::intracomm, &_num_ranks);
   if (return_err != MPI_SUCCESS) {
     std::cerr << "MPI_FAILURE" << std::endl;
   }
 
   // Get shared interprocess data
-  std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
+  const std::string shared_data_name = generateInterprocessName();
   try {
     segment_ = boost::interprocess::managed_shared_memory(
         boost::interprocess::open_only, shared_data_name.c_str());
@@ -43,17 +44,23 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
 
     exit(-1);
   }
-  // instance_ = segment_.find<PhotonSharingData>(
-  //     "PhotonSharingData photon_sharing_instance");
-  //
-  // // Set class member ptr to shared data
-  // shared_data_ = instance_.first;
 
   // Sets strength for entire source term, not just this local contribution
   // Mostly used for tally normalisation later on!
   strength_ = 1;
 
   // setupLocalElementsDiscreteIndex(shared_data_);
+}
+
+const std::string FizzyCompiledSource::generateInterprocessName() {
+  char mpi_proc_name[MPI_MAX_PROCESSOR_NAME];
+  int len = 0;
+  int err = MPI_Get_processor_name(mpi_proc_name, &len);
+
+  std::string ipc_name = std::string(mpi_proc_name);
+  ipc_name += "_" + std::to_string(openmc::mpi::rank);
+
+  return ipc_name;
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
