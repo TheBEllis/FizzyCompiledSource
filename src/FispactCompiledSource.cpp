@@ -48,8 +48,6 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
   // Sets strength for entire source term, not just this local contribution
   // Mostly used for tally normalisation later on!
   strength_ = 1;
-
-  // setupLocalElementsDiscreteIndex(shared_data_);
 }
 
 const std::string FizzyCompiledSource::generateInterprocessName() {
@@ -64,7 +62,7 @@ const std::string FizzyCompiledSource::generateInterprocessName() {
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
-  std::string shared_data_name = "SHARING_DATA_" + std::to_string(_my_rank);
+  const std::string shared_data_name = generateInterprocessName();
   bi::shared_memory_object::remove(shared_data_name.c_str());
 }
 
@@ -135,10 +133,9 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
   // this is a bit messy but avoids doing a copy!
   const double *element_energy =
       &shared_data->_photon_fluxes.at(element_id).at(0);
-
   const double *photon_bins = &shared_data->_photon_bins.at(0);
   size_t n_bins = shared_data->_photon_bins.size();
-  openmc::Tabular distribution(element_energy, photon_bins, n_bins,
+  openmc::Tabular distribution(photon_bins, element_energy, n_bins,
                                openmc::Interpolation::histogram, nullptr);
 
   while (true) {
@@ -176,7 +173,7 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
 
   // Currently multiplying by number of ranks, mimicing behavoir in
   // openmc/src/source.cpp:sample_external_source (line 696)
-  particle.wgt = calculateParticleWeight(shared_data_) * _num_ranks;
+  particle.wgt = calculateParticleWeight(shared_data_) * openmc::mpi::n_procs;
 
   // Calculate position
   // Get element index of sampled element
