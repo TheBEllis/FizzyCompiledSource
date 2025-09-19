@@ -21,17 +21,6 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
   double T[]{0.0};
   double p[]{1.0};
   time_ = openmc::UPtrDist{new openmc::Discrete{T, p, 1}};
-  // Get MPI rank
-  //
-  auto return_err = MPI_Comm_rank(openmc::mpi::intracomm, &_my_rank);
-  if (return_err != MPI_SUCCESS) {
-    std::cerr << "MPI_FAILURE" << std::endl;
-  }
-
-  return_err = MPI_Comm_size(openmc::mpi::intracomm, &_num_ranks);
-  if (return_err != MPI_SUCCESS) {
-    std::cerr << "MPI_FAILURE" << std::endl;
-  }
 
   // Get shared interprocess data
   const std::string shared_data_name = generateInterprocessName();
