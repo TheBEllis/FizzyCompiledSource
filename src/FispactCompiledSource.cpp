@@ -101,7 +101,14 @@ FizzyCompiledSource::sampleElementVolume(uint64_t *seed, int32_t mesh_id,
   // Get openmc mesh
   openmc::Position r;
 
-  int32_t mesh_idx = openmc::model::mesh_map.at(mesh_id);
+  int32_t mesh_idx;
+
+  try {
+    mesh_idx = openmc::model::mesh_map.at(mesh_id);
+  } catch (std::out_of_range) {
+    std::cerr << "No mesh with mesh_idx " + std::to_string(mesh_id) + " found"
+              << std::endl;
+  }
   std::unique_ptr<openmc::Mesh> &mesh = openmc::model::meshes[mesh_idx];
 
   openmc::LibMesh *derived_libmesh_ptr =
