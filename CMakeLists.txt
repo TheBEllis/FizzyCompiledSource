@@ -11,14 +11,14 @@ endif(NOT DEFINED CARDINAL_DIR)
 find_package(PkgConfig REQUIRED)
 
 find_package(OpenMC REQUIRED
-             HINTS ${CARDINAL_DIR}/install/cmake/OpenMC)
+             HINTS ${CARDINAL_DIR}/install/)
 
 pkg_check_modules(LIBMESH REQUIRED libmesh-opt)
 
 # Need compile definitions to open up correct code paths
 add_compile_definitions(OPENMC_LIBMESH_ENABLED)
 add_compile_definitions(OPENMC_MPI)
-
+message(STATUS ${CMAKE_SOURCE_DIR})
 add_library(CompiledSource SHARED ${CMAKE_SOURCE_DIR}/src/FispactCompiledSource.cpp)
 target_link_libraries(CompiledSource PUBLIC stdc++ OpenMC::libopenmc)
-target_include_directories(CompiledSource PUBLIC ${CMAKE_SOURCE_DIR}/include ${OPENMC_INCLUDE_DIR}  ${LIBMESH_INCLUDE_DIRS})
+target_include_directories(CompiledSource PUBLIC ${CMAKE_SOURCE_DIR}/include ${LIBMESH_INCLUDE_DIRS})
