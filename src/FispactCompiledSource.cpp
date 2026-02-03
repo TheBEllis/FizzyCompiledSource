@@ -135,7 +135,7 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
                                openmc::Interpolation::histogram, nullptr);
 
   while (true) {
-    double energy = distribution.sample(seed);
+    double energy = distribution.sample(seed).first;
 
     if (satisfies_energy_constraints(energy)) {
       return energy;
@@ -177,11 +177,11 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // Sample a position within the volume of our chosen chosen element
   particle.r = sampleElementVolume(seed, _mesh_id, element_id);
   // Sample an isotropic angle
-  particle.u = angle_->sample(seed);
+  particle.u = angle_->sample(seed).first;
   // Sample isotropic angle
   particle.E = sampleElementEnergy(seed, shared_data_, element_id);
   // Sample time
-  particle.time = time_->sample(seed);
+  particle.time = time_->sample(seed).first;
 
   return particle;
 }
