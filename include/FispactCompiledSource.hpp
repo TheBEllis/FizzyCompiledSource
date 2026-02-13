@@ -41,19 +41,21 @@ public:
                              const PhotonSharingData *shared_data,
                              const int32_t &element_id) const;
 
+  size_t getSpectraIdx(const PhotonSharingData *shared_data,
+                       const int32_t &element_id) const;
+
   bool constraints_applied() const override { return true; }
 
   const std::string generateInterprocessName();
 
-  openmc::SourceSite sample(u_int64_t *seed) const;
+  openmc::SourceSite sample(uint64_t *seed) const;
 
   // Data members
   openmc::UPtrAngle angle_;
   openmc::UPtrDist time_;
+
   //
-  int _num_ranks = -1;
-  int _my_rank = -1;
-  int32_t _mesh_id;
+  int32_t mesh_id_;
 
   // Interprocess data structures
   boost::interprocess::managed_shared_memory segment_;
