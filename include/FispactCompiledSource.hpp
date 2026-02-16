@@ -60,7 +60,7 @@ public:
   // Interprocess data structures
   boost::interprocess::managed_shared_memory segment_;
   std::pair<PhotonSharingData *, std::size_t> instance_;
-  const PhotonSharingData *shared_data_;
+  PhotonSharingData *shared_data_;
 
   std::vector<int> element_ids_;
   openmc::DiscreteIndex di_;

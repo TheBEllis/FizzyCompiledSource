@@ -25,7 +25,6 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
 
   // Get shared interprocess data
   const std::string shared_data_name = generateInterprocessName();
-  std::cout << shared_data_name << std::endl;
 
   try {
     segment_ = boost::interprocess::managed_shared_memory(
@@ -36,10 +35,6 @@ FizzyCompiledSource::FizzyCompiledSource(int32_t mesh_id)
 
     exit(-1);
   }
-
-  // Sets strength for entire source term, not just this local contribution
-  // Mostly used for tally normalisation later on!
-  strength_ = 1;
 }
 
 const std::string FizzyCompiledSource::generateInterprocessName() {
@@ -54,7 +49,6 @@ const std::string FizzyCompiledSource::generateInterprocessName() {
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
-  std::cout << "DESTRUCTOR" << std::endl;
   const std::string shared_data_name = generateInterprocessName();
   bi::shared_memory_object::remove(shared_data_name.c_str());
 }
@@ -124,7 +118,7 @@ FizzyCompiledSource::sampleElementVolume(uint64_t *seed, int32_t mesh_id,
 
 size_t FizzyCompiledSource::getSpectraIdx(const PhotonSharingData *shared_data,
                                           const int32_t &element_id) const {
-  size_t n_bins = shared_data->_photon_bins.size();
+  size_t n_bins = shared_data->_photon_bins.size() - 1;
   return n_bins * shared_data->_local_elem_idx_map.at(element_id);
 }
 
@@ -135,17 +129,35 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
 
   // Set up ptrs to element energy distribution and photon bins in shared data,
   // this is a bit messy but avoids doing a copy!
-  const double *element_energy =
-      &shared_data->_photon_fluxes.at(getSpectraIdx(shared_data, element_id));
+  // const double *element_energy =
+  //     &shared_data->_photon_fluxes.at(getSpectraIdx(shared_data,
+  //     element_id));
+
+  /// _photon_bins represents the boundaries of each bin, so 25 values represent
+  /// 24 bins, hence the need for -1
+  size_t n_bin_boundaries = shared_data->_photon_bins.size();
+  size_t n_bins = n_bin_boundaries - 1;
+
+  std::vector<double> element_energy(
+      shared_data->_photon_fluxes.begin() +
+          getSpectraIdx(shared_data, element_id),
+      shared_data->_photon_fluxes.begin() +
+          getSpectraIdx(shared_data, element_id) + n_bins);
 
   const double *photon_bins = &shared_data->_photon_bins.at(0);
 
-  size_t n_bins = shared_data->_photon_bins.size();
-  openmc::Tabular distribution(photon_bins, element_energy, n_bins,
-                               openmc::Interpolation::histogram, nullptr);
+  /// Must divide element_energy by bin width to get proper histogram sampling
+  for (int i = 1; i < n_bin_boundaries; i++) {
+    double bin_width = *(photon_bins + i) - *(photon_bins + (i - 1));
+    element_energy[i - 1] /= bin_width;
+  }
+
+  openmc::Tabular energy_distribution(photon_bins, element_energy.data(),
+                                      n_bins, openmc::Interpolation::histogram,
+                                      nullptr);
 
   while (true) {
-    double energy = distribution.sample(seed);
+    double energy = energy_distribution.sample(seed);
 
     if (satisfies_energy_constraints(energy)) {
       return energy;
