@@ -73,6 +73,7 @@ void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
   std::vector<double> element_strengths(boost_element_strength.begin(),
                                         boost_element_strength.end());
 
+  element_ids_.clear();
   element_ids_.reserve(element_strengths.size());
 
   for (const auto &[global_elem_id, local_elem_id] :
