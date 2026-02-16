@@ -171,16 +171,21 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // This setup should really be in the constructor, but doing it here makes it
   // compatible with MOOSE-multiapp runs. When using as a MOOSE-multiapp, the
   // constructor gets called before the shared data is ready to be read
-  if (!setup_) {
-    auto *p_this = const_cast<FizzyCompiledSource *>(this);
-    p_this->instance_ =
-        p_this->segment_.find<PhotonSharingData>("photon_sharing_instance");
 
-    // Set class member ptr to shared data
-    p_this->shared_data_ = instance_.first;
+  auto *p_this = const_cast<FizzyCompiledSource *>(this);
+  p_this->instance_ =
+      p_this->segment_.find<PhotonSharingData>("photon_sharing_instance");
 
+  // Set class member ptr to shared data
+  p_this->shared_data_ = instance_.first;
+
+  if (!shared_data_->_is_setup) {
     p_this->setupLocalElementsDiscreteIndex(shared_data_);
-    p_this->setup_ = true;
+    p_this->strength_ = shared_data_->_total_domain_strength;
+
+    std::vector<double> source_strengths = {strength_};
+    openmc::model::external_sources_probability.assign(source_strengths);
+    shared_data_->_is_setup = true;
   }
 
   // init particle
