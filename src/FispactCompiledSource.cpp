@@ -143,7 +143,7 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
   const openmc::Tabular &energy_distribution = *energy_distributions_[idx];
 
   while (true) {
-    double energy = energy_distribution.sample(seed);
+    double energy = energy_distribution.sample(seed).first;
 
     if (satisfies_energy_constraints(energy)) {
       return energy;
@@ -241,9 +241,7 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // Sample isotropic angle
   particle.E = sampleElementEnergy(seed, shared_data_, element_id);
   // Sample time
-  particle.time = time_->sample(seed);
-  // }
-  return particle;
+  particle.time = time_->sample(seed).first;
 }
 
 extern "C" std::unique_ptr<FizzyCompiledSource>
