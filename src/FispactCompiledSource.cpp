@@ -1,6 +1,7 @@
 #include "FispactCompiledSource.hpp"
 
 #include "mpi.h"
+#include "openmc/capi.h"
 #include "openmc/constants.h"
 #include "openmc/distribution.h"
 #include "openmc/distribution_multi.h"
@@ -136,26 +137,9 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
 
   /// _photon_bins represents the boundaries of each bin, so 25 values represent
   /// 24 bins, hence the need for -1
-  size_t n_bin_boundaries = shared_data->_photon_bins.size();
-  size_t n_bins = n_bin_boundaries - 1;
 
-  std::vector<double> element_energy(
-      shared_data->_photon_fluxes.begin() +
-          getSpectraIdx(shared_data, element_id),
-      shared_data->_photon_fluxes.begin() +
-          getSpectraIdx(shared_data, element_id) + n_bins);
-
-  const double *photon_bins = &shared_data->_photon_bins.at(0);
-
-  /// Must divide element_energy by bin width to get proper histogram sampling
-  for (int i = 1; i < n_bin_boundaries; i++) {
-    double bin_width = *(photon_bins + i) - *(photon_bins + (i - 1));
-    element_energy[i - 1] /= bin_width;
-  }
-
-  openmc::Tabular energy_distribution(photon_bins, element_energy.data(),
-                                      n_bins, openmc::Interpolation::histogram,
-                                      nullptr);
+  const openmc::Tabular &energy_distribution =
+      energy_distributions_[shared_data->_local_elem_idx_map.at(element_id)];
 
   while (true) {
     double energy = energy_distribution.sample(seed);
@@ -166,6 +150,62 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
   }
 }
 
+void FizzyCompiledSource::constructEnergyDistributions(
+    const PhotonSharingData *shared_data) {
+
+  energy_distributions_.reserve(shared_data->_local_elem_idx_map.size());
+  for (auto &element_id : element_ids_) {
+    size_t n_bin_boundaries = shared_data->_photon_bins.size();
+    size_t n_bins = n_bin_boundaries - 1;
+
+    std::vector<double> element_energy(
+        shared_data->_photon_fluxes.begin() +
+            getSpectraIdx(shared_data, element_id),
+        shared_data->_photon_fluxes.begin() +
+            getSpectraIdx(shared_data, element_id) + n_bins);
+
+    const double *photon_bins = &shared_data->_photon_bins.at(0);
+
+    /// Must divide element_energy by bin width to get proper histogram sampling
+    for (int i = 1; i < n_bin_boundaries; i++) {
+      double bin_width = *(photon_bins + i) - *(photon_bins + (i - 1));
+      element_energy.at(i - 1) /= bin_width;
+    }
+
+    openmc::Tabular energy_distribution(
+        photon_bins, element_energy.data(), n_bins,
+        openmc::Interpolation::histogram, nullptr);
+
+    energy_distributions_.push_back(energy_distribution);
+  }
+}
+
+void FizzyCompiledSource::sharedDataInit() const {
+
+  if (initialised_) {
+    return;
+  }
+  auto *p_this = const_cast<FizzyCompiledSource *>(this);
+  p_this->instance_ =
+      p_this->segment_.find<PhotonSharingData>("photon_sharing_instance");
+  // Set class member ptr to shared data
+  p_this->shared_data_ = instance_.first;
+  p_this->initialised_ = true;
+}
+
+void FizzyCompiledSource::timestepInit() const {
+  if (!shared_data_->_is_setup) {
+    auto *p_this = const_cast<FizzyCompiledSource *>(this);
+    p_this->setupLocalElementsDiscreteIndex(shared_data_);
+    p_this->constructEnergyDistributions(shared_data_);
+    p_this->strength_ = shared_data_->_total_domain_strength;
+
+    std::vector<double> source_strengths = {strength_};
+    openmc::model::external_sources_probability.assign(source_strengths);
+    shared_data_->_is_setup = true;
+  }
+}
+
 openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
 
   // If this is the first sample, do setup.
@@ -173,26 +213,19 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
   // compatible with MOOSE-multiapp runs. When using as a MOOSE-multiapp, the
   // constructor gets called before the shared data is ready to be read
 
-  auto *p_this = const_cast<FizzyCompiledSource *>(this);
-  p_this->instance_ =
-      p_this->segment_.find<PhotonSharingData>("photon_sharing_instance");
-
-  // Set class member ptr to shared data
-  p_this->shared_data_ = instance_.first;
-
-  if (!shared_data_->_is_setup) {
-    p_this->setupLocalElementsDiscreteIndex(shared_data_);
-    p_this->strength_ = shared_data_->_total_domain_strength;
-
-    std::vector<double> source_strengths = {strength_};
-    openmc::model::external_sources_probability.assign(source_strengths);
-    shared_data_->_is_setup = true;
-  }
-
-  // init particle
   openmc::SourceSite particle;
+// init particle
+#pragma omp single
+  {
+    // Perform one time setup
+    sharedDataInit();
+    // Perform once per timestep setup
+    timestepInit();
+  }
+#pragma omp barrier
 
-  // weight
+  int32_t element_id = sampleLocalElementsIndex(seed);
+
   particle.particle = openmc::ParticleType::photon;
 
   // Currently multiplying by number of ranks, mimicing behavoir in
@@ -201,16 +234,16 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
 
   // Calculate position
   // Get element index of sampled element
-  int32_t element_id = sampleLocalElementsIndex(seed);
   // Sample a position within the volume of our chosen chosen element
   particle.r = sampleElementVolume(seed, mesh_id_, element_id);
   // Sample an isotropic angle
   particle.u = angle_->sample(seed);
+
   // Sample isotropic angle
   particle.E = sampleElementEnergy(seed, shared_data_, element_id);
   // Sample time
   particle.time = time_->sample(seed);
-
+  // }
   return particle;
 }
 

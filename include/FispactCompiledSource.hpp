@@ -34,6 +34,8 @@ public:
 
   void setupLocalElementsDiscreteIndex(const PhotonSharingData *shared_data);
 
+  void constructEnergyDistributions(const PhotonSharingData *shared_data);
+
   openmc::Position sampleElementVolume(u_int64_t *seed, int mesh_id,
                                        int element_id) const;
 
@@ -43,6 +45,10 @@ public:
 
   size_t getSpectraIdx(const PhotonSharingData *shared_data,
                        const int32_t &element_id) const;
+
+  void sharedDataInit() const;
+
+  void timestepInit() const;
 
   bool constraints_applied() const override { return true; }
 
@@ -63,7 +69,8 @@ public:
   PhotonSharingData *shared_data_;
 
   std::vector<int> element_ids_;
+  std::vector<openmc::Tabular> energy_distributions_;
   openmc::DiscreteIndex di_;
 
-  bool setup_ = false;
+  bool initialised_ = false;
 };
