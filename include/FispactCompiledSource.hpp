@@ -69,7 +69,7 @@ public:
   PhotonSharingData *shared_data_;
 
   std::vector<int> element_ids_;
-  std::vector<openmc::Tabular> energy_distributions_;
+  std::vector<std::unique_ptr<openmc::Tabular>> energy_distributions_;
   openmc::DiscreteIndex di_;
 
   bool initialised_ = false;

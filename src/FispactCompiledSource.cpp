@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <fcntl.h>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <sys/types.h>
@@ -138,8 +139,8 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
   /// _photon_bins represents the boundaries of each bin, so 25 values represent
   /// 24 bins, hence the need for -1
 
-  const openmc::Tabular &energy_distribution =
-      energy_distributions_[shared_data->_local_elem_idx_map.at(element_id)];
+  auto idx = shared_data->_local_elem_idx_map.at(element_id);
+  const openmc::Tabular &energy_distribution = *energy_distributions_[idx];
 
   while (true) {
     double energy = energy_distribution.sample(seed);
@@ -172,9 +173,9 @@ void FizzyCompiledSource::constructEnergyDistributions(
       element_energy.at(i - 1) /= bin_width;
     }
 
-    energy_distributions_.emplace_back(photon_bins, element_energy.data(),
-                                       n_bins, openmc::Interpolation::histogram,
-                                       nullptr);
+    energy_distributions_.push_back(std::make_unique<openmc::Tabular>(
+        photon_bins, element_energy.data(), n_bins,
+        openmc::Interpolation::histogram, nullptr));
   }
 }
 
