@@ -172,11 +172,9 @@ void FizzyCompiledSource::constructEnergyDistributions(
       element_energy.at(i - 1) /= bin_width;
     }
 
-    openmc::Tabular energy_distribution(
-        photon_bins, element_energy.data(), n_bins,
-        openmc::Interpolation::histogram, nullptr);
-
-    energy_distributions_.push_back(energy_distribution);
+    energy_distributions_.emplace_back(photon_bins, element_energy.data(),
+                                       n_bins, openmc::Interpolation::histogram,
+                                       nullptr);
   }
 }
 
