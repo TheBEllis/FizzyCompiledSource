@@ -44,15 +44,22 @@ const std::string FizzyCompiledSource::generateInterprocessName() {
   int len = 0;
   int err = MPI_Get_processor_name(mpi_proc_name, &len);
 
+  MPI_Comm node_comm;
+  int local_rank;
+  MPI_Comm_split_type(openmc::mpi::intracomm, MPI_COMM_TYPE_SHARED, 0,
+                      MPI_INFO_NULL, &node_comm);
+  MPI_Comm_rank(node_comm, &local_rank);
+
   std::string ipc_name = std::string(mpi_proc_name);
-  ipc_name += "_" + std::to_string(openmc::mpi::rank);
+
+  ipc_name += "_" + std::to_string(local_rank);
 
   return ipc_name;
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
-  const std::string shared_data_name = generateInterprocessName();
-  bi::shared_memory_object::remove(shared_data_name.c_str());
+//const std::string shared_data_name = generateInterprocessName();
+// bi::shared_memory_object::remove(shared_data_name.c_str());
 }
 
 double FizzyCompiledSource::calculateParticleWeight(
