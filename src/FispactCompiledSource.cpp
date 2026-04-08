@@ -58,8 +58,8 @@ const std::string FizzyCompiledSource::generateInterprocessName() {
 }
 
 FizzyCompiledSource::~FizzyCompiledSource() {
-//const std::string shared_data_name = generateInterprocessName();
-// bi::shared_memory_object::remove(shared_data_name.c_str());
+  // const std::string shared_data_name = generateInterprocessName();
+  //  bi::shared_memory_object::remove(shared_data_name.c_str());
 }
 
 double FizzyCompiledSource::calculateParticleWeight(
@@ -232,7 +232,7 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
 
   int32_t element_id = sampleLocalElementsIndex(seed);
 
-  particle.particle = openmc::ParticleType::photon;
+  particle.particle = openmc::ParticleType::photon();
 
   // Currently multiplying by number of ranks, mimicing behavoir in
   // openmc/src/source.cpp:sample_external_source (line 696)
