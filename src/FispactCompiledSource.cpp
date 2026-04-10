@@ -160,7 +160,8 @@ FizzyCompiledSource::sampleElementEnergy(uint64_t *seed,
 
 void FizzyCompiledSource::constructEnergyDistributions(
     const PhotonSharingData *shared_data) {
-
+  /// clear values from previous timestep
+  energy_distributions_.clear();
   energy_distributions_.reserve(shared_data->_local_elem_idx_map.size());
   for (auto &element_id : element_ids_) {
     size_t n_bin_boundaries = shared_data->_photon_bins.size();
