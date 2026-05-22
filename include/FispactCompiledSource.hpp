@@ -1,10 +1,10 @@
+#pragma once
+
+//
 #include <boost/interprocess/interprocess_fwd.hpp>
 #include <cstdint>
 #include <memory> // for unique_ptr
 #include <sys/types.h>
-
-// Define LIBMESH so that openmc libmesh gets included
-#define LIBMESH
 
 #include "openmc/distribution_multi.h"
 #include "openmc/position.h"
@@ -34,6 +34,8 @@ public:
 
   void setupLocalElementsDiscreteIndex(const PhotonSharingData *shared_data);
 
+  void constructEnergyDistributions(const PhotonSharingData *shared_data);
+
   openmc::Position sampleElementVolume(u_int64_t *seed, int mesh_id,
                                        int element_id) const;
 
@@ -41,23 +43,34 @@ public:
                              const PhotonSharingData *shared_data,
                              const int32_t &element_id) const;
 
+  size_t getSpectraIdx(const PhotonSharingData *shared_data,
+                       const int32_t &element_id) const;
+
+  void sharedDataInit() const;
+
+  void timestepInit() const;
+
   bool constraints_applied() const override { return true; }
 
-  openmc::SourceSite sample(u_int64_t *seed) const;
+  const std::string generateInterprocessName();
+
+  openmc::SourceSite sample(uint64_t *seed) const;
 
   // Data members
   openmc::UPtrAngle angle_;
   openmc::UPtrDist time_;
+
   //
-  int _num_ranks = -1;
-  int _my_rank = -1;
-  int32_t _mesh_id;
+  int32_t mesh_id_;
 
   // Interprocess data structures
   boost::interprocess::managed_shared_memory segment_;
   std::pair<PhotonSharingData *, std::size_t> instance_;
-  const PhotonSharingData *shared_data_;
+  PhotonSharingData *shared_data_;
 
   std::vector<int> element_ids_;
+  std::vector<std::unique_ptr<openmc::Tabular>> energy_distributions_;
   openmc::DiscreteIndex di_;
+
+  bool initialised_ = false;
 };
