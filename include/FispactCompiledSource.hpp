@@ -28,16 +28,22 @@ public:
   double calculateParticleWeight(const double &local_domain_strength,
                                  const double &total_domain_strength) const;
 
-  double calculateParticleWeight(const PhotonSharingData *shared_data) const;
+  double calculateParticleWeight(const PhotonSharingData *shared_data,
+                                 bool uniform, int32_t element_id) const;
+
+  double
+  calculateParticleWeightUniform(const double &element_strength,
+                                 const double &local_domain_strength) const;
 
   int32_t sampleLocalElementsIndex(uint64_t *seed) const;
 
-  void setupLocalElementsDiscreteIndex(const PhotonSharingData *shared_data);
+  void setupLocalElementsDiscreteIndex(const PhotonSharingData *shared_data,
+                                       bool uniform);
 
   void constructEnergyDistributions(const PhotonSharingData *shared_data);
 
   openmc::Position sampleElementVolume(u_int64_t *seed, int mesh_id,
-                                       int element_id) const;
+                                       int32_t element_id) const;
 
   double sampleElementEnergy(uint64_t *seed,
                              const PhotonSharingData *shared_data,
@@ -72,5 +78,6 @@ public:
   std::vector<std::unique_ptr<openmc::Tabular>> energy_distributions_;
   openmc::DiscreteIndex di_;
 
+  bool uniform_ = false;
   bool initialised_ = false;
 };

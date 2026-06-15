@@ -68,31 +68,57 @@ double FizzyCompiledSource::calculateParticleWeight(
   return local_domain_strength / total_domain_strength;
 }
 
-double FizzyCompiledSource::calculateParticleWeight(
-    const PhotonSharingData *shared_data) const {
-  return calculateParticleWeight(shared_data->_local_domain_strength,
-                                 shared_data->_total_domain_strength);
+double FizzyCompiledSource::calculateParticleWeightUniform(
+    const double &element_strength, const double &local_domain_strength) const {
+  return element_strength * element_ids_.size() / local_domain_strength;
 }
 
-void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
-    const PhotonSharingData *shared_data) {
+double FizzyCompiledSource::calculateParticleWeight(
+    const PhotonSharingData *shared_data, bool uniform,
+    int32_t element_id) const {
+
+  if (!uniform) {
+    return calculateParticleWeight(shared_data->_local_domain_strength,
+                                   shared_data->_total_domain_strength);
+  }
 
   const BoostIpVector &boost_element_strength = shared_data->_elem_strength;
 
-  std::vector<double> element_strengths(boost_element_strength.begin(),
-                                        boost_element_strength.end());
+  size_t local_elem_id = shared_data->_local_elem_idx_map.at(element_id);
 
+  double element_strength = boost_element_strength[local_elem_id];
+
+  return calculateParticleWeightUniform(element_strength,
+                                        shared_data->_local_domain_strength);
+}
+
+void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
+    const PhotonSharingData *shared_data, bool uniform) {
+
+  // Clear from last timestep
   element_ids_.clear();
-  element_ids_.reserve(element_strengths.size());
+  element_ids_.reserve(shared_data->_num_local_elems);
 
   for (const auto &[global_elem_id, local_elem_id] :
        shared_data->_local_elem_idx_map) {
     element_ids_.push_back(global_elem_id);
   }
 
-  // Set up discrete index to sample element id's from, copying behavoir from
-  // openmc::MeshSource
-  di_.assign(element_strengths);
+  if (uniform) {
+    std::vector<double> uniform_strength(element_ids_.size(), 1);
+
+    di_.assign(uniform_strength);
+
+  } else {
+
+    const BoostIpVector &boost_element_strength = shared_data->_elem_strength;
+    std::vector<double> element_strengths(boost_element_strength.begin(),
+                                          boost_element_strength.end());
+
+    // Set up discrete index to sample element id's from, copying behavoir from
+    // openmc::MeshSource
+    di_.assign(std::vector<double>(element_strengths));
+  }
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(uint64_t *seed) const {
@@ -203,7 +229,8 @@ void FizzyCompiledSource::sharedDataInit() const {
 void FizzyCompiledSource::timestepInit() const {
   if (!shared_data_->_is_setup) {
     auto *p_this = const_cast<FizzyCompiledSource *>(this);
-    p_this->setupLocalElementsDiscreteIndex(shared_data_);
+    p_this->uniform_ = shared_data_->_uniform;
+    p_this->setupLocalElementsDiscreteIndex(shared_data_, p_this->uniform_);
     p_this->constructEnergyDistributions(shared_data_);
     p_this->strength_ = shared_data_->_total_domain_strength;
 
@@ -237,7 +264,8 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
 
   // Currently multiplying by number of ranks, mimicing behavoir in
   // openmc/src/source.cpp:sample_external_source (line 696)
-  particle.wgt = calculateParticleWeight(shared_data_) * openmc::mpi::n_procs;
+  particle.wgt = calculateParticleWeight(shared_data_, uniform_, element_id) *
+                 openmc::mpi::n_procs;
 
   // Calculate position
   // Get element index of sampled element
