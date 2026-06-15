@@ -33,7 +33,7 @@ public:
 
   double
   calculateParticleWeightUniform(const double &element_strength,
-                                 const double &local_domain_strength) const;
+                                 const double &total_domain_strength) const;
 
   int32_t sampleLocalElementsIndex(uint64_t *seed) const;
 

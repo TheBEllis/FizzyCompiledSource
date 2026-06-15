@@ -69,8 +69,8 @@ double FizzyCompiledSource::calculateParticleWeight(
 }
 
 double FizzyCompiledSource::calculateParticleWeightUniform(
-    const double &element_strength, const double &local_domain_strength) const {
-  return element_strength * element_ids_.size() / local_domain_strength;
+    const double &element_strength, const double &total_domain_strength) const {
+  return element_strength * element_ids_.size() / total_domain_strength;
 }
 
 double FizzyCompiledSource::calculateParticleWeight(
@@ -89,7 +89,7 @@ double FizzyCompiledSource::calculateParticleWeight(
   double element_strength = boost_element_strength[local_elem_id];
 
   return calculateParticleWeightUniform(element_strength,
-                                        shared_data->_local_domain_strength);
+                                        shared_data->_total_domain_strength);
 }
 
 void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
