@@ -69,13 +69,15 @@ double FizzyCompiledSource::calculateParticleWeight(
 }
 
 double FizzyCompiledSource::calculateParticleWeightUniform(
-    const double &element_strength, const double &total_domain_strength) const {
-  return element_strength * element_ids_.size() / total_domain_strength;
+    const double &element_strength, const double &element_volume,
+    const double &total_domain_strength) const {
+  return rank_elements_volume_ * element_strength /
+         (element_volume * total_domain_strength);
 }
 
 double FizzyCompiledSource::calculateParticleWeight(
-    const PhotonSharingData *shared_data, bool uniform,
-    int32_t element_id) const {
+    const PhotonSharingData *shared_data, bool uniform, int32_t element_id,
+    int32_t mesh_id) const {
 
   if (!uniform) {
     return calculateParticleWeight(shared_data->_local_domain_strength,
@@ -88,37 +90,71 @@ double FizzyCompiledSource::calculateParticleWeight(
 
   double element_strength = boost_element_strength[local_elem_id];
 
-  return calculateParticleWeightUniform(element_strength,
+  int32_t mesh_idx;
+
+  try {
+    mesh_idx = openmc::model::mesh_map.at(mesh_id);
+  } catch (std::out_of_range) {
+    std::cerr << "No mesh with mesh_idx " + std::to_string(mesh_id) + " found"
+              << std::endl;
+  }
+  std::unique_ptr<openmc::Mesh> &mesh = openmc::model::meshes[mesh_idx];
+
+  openmc::LibMesh *derived_libmesh_ptr =
+      dynamic_cast<openmc::LibMesh *>(mesh.get());
+
+  double element_volume = derived_libmesh_ptr->volume(element_id);
+
+  return calculateParticleWeightUniform(element_strength, element_volume,
                                         shared_data->_total_domain_strength);
 }
 
 void FizzyCompiledSource::setupLocalElementsDiscreteIndex(
-    const PhotonSharingData *shared_data, bool uniform) {
+    const PhotonSharingData *shared_data, bool uniform, int32_t mesh_id) {
 
   // Clear from last timestep
   element_ids_.clear();
   element_ids_.reserve(shared_data->_num_local_elems);
 
+  std::vector<double> element_probabilities;
+  element_probabilities.reserve(shared_data->_num_local_elems);
+
   for (const auto &[global_elem_id, local_elem_id] :
        shared_data->_local_elem_idx_map) {
     element_ids_.push_back(global_elem_id);
+
+    if (uniform) {
+
+      int32_t mesh_idx;
+
+      try {
+        mesh_idx = openmc::model::mesh_map.at(mesh_id);
+      } catch (std::out_of_range) {
+        std::cerr << "No mesh with mesh_idx " + std::to_string(mesh_id) +
+                         " found"
+                  << std::endl;
+      }
+      std::unique_ptr<openmc::Mesh> &mesh = openmc::model::meshes[mesh_idx];
+
+      openmc::LibMesh *derived_libmesh_ptr =
+          dynamic_cast<openmc::LibMesh *>(mesh.get());
+
+      double element_volume = derived_libmesh_ptr->volume(global_elem_id);
+
+      rank_elements_volume_ += element_volume;
+
+      element_probabilities.push_back(element_volume);
+    }
   }
 
-  if (uniform) {
-    std::vector<double> uniform_strength(element_ids_.size(), 1);
-
-    di_.assign(uniform_strength);
-
-  } else {
+  if (!uniform) {
 
     const BoostIpVector &boost_element_strength = shared_data->_elem_strength;
-    std::vector<double> element_strengths(boost_element_strength.begin(),
-                                          boost_element_strength.end());
-
-    // Set up discrete index to sample element id's from, copying behavoir from
-    // openmc::MeshSource
-    di_.assign(std::vector<double>(element_strengths));
+    element_probabilities = std::vector<double>(boost_element_strength.begin(),
+                                                boost_element_strength.end());
   }
+
+  di_.assign(element_probabilities);
 }
 
 int32_t FizzyCompiledSource::sampleLocalElementsIndex(uint64_t *seed) const {
@@ -230,7 +266,8 @@ void FizzyCompiledSource::timestepInit() const {
   if (!shared_data_->_is_setup) {
     auto *p_this = const_cast<FizzyCompiledSource *>(this);
     p_this->uniform_ = shared_data_->_uniform;
-    p_this->setupLocalElementsDiscreteIndex(shared_data_, p_this->uniform_);
+    p_this->setupLocalElementsDiscreteIndex(shared_data_, p_this->uniform_,
+                                            mesh_id_);
     p_this->constructEnergyDistributions(shared_data_);
     p_this->strength_ = shared_data_->_total_domain_strength;
 
@@ -264,8 +301,9 @@ openmc::SourceSite FizzyCompiledSource::sample(uint64_t *seed) const {
 
   // Currently multiplying by number of ranks, mimicing behavoir in
   // openmc/src/source.cpp:sample_external_source (line 696)
-  particle.wgt = calculateParticleWeight(shared_data_, uniform_, element_id) *
-                 openmc::mpi::n_procs;
+  particle.wgt =
+      calculateParticleWeight(shared_data_, uniform_, element_id, mesh_id_) *
+      openmc::mpi::n_procs;
 
   // Calculate position
   // Get element index of sampled element

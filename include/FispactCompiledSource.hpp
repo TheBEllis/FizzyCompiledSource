@@ -29,16 +29,18 @@ public:
                                  const double &total_domain_strength) const;
 
   double calculateParticleWeight(const PhotonSharingData *shared_data,
-                                 bool uniform, int32_t element_id) const;
+                                 bool uniform, int32_t element_id,
+                                 int32_t mesh_id) const;
 
   double
   calculateParticleWeightUniform(const double &element_strength,
+                                 const double &element_volume,
                                  const double &total_domain_strength) const;
 
   int32_t sampleLocalElementsIndex(uint64_t *seed) const;
 
   void setupLocalElementsDiscreteIndex(const PhotonSharingData *shared_data,
-                                       bool uniform);
+                                       bool uniform, int32_t mesh_id);
 
   void constructEnergyDistributions(const PhotonSharingData *shared_data);
 
@@ -80,4 +82,6 @@ public:
 
   bool uniform_ = false;
   bool initialised_ = false;
+
+  double rank_elements_volume_ = 0;
 };
