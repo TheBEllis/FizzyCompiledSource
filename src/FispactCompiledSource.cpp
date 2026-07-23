@@ -265,6 +265,7 @@ void FizzyCompiledSource::sharedDataInit() const {
 void FizzyCompiledSource::timestepInit() const {
   if (!shared_data_->_is_setup) {
     auto *p_this = const_cast<FizzyCompiledSource *>(this);
+    p_this->rank_elements_volume_ = 0;
     p_this->uniform_ = shared_data_->_uniform;
     p_this->setupLocalElementsDiscreteIndex(shared_data_, p_this->uniform_,
                                             mesh_id_);
